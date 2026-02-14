@@ -73,14 +73,25 @@
             margin: 0 auto;
         }
 
-        .logo-section h1 {
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-image {
+            height: 60px;
+            width: auto;
+        }
+
+        .logo-text h1 {
             font-family: 'DM Serif Display', serif;
             font-size: 2.5rem;
             color: var(--primary-blue);
             margin-bottom: 4px;
         }
 
-        .logo-section .tagline {
+        .logo-text .tagline {
             color: var(--text-secondary);
             font-size: 0.95rem;
             font-weight: 300;
@@ -965,8 +976,14 @@
                     <header className="header">
                         <div className="header-content">
                             <div className="logo-section">
-                                <h1>HonestMD</h1>
-                                <p className="tagline">Healthcare Professional Reviews by Healthcare Professionals</p>
+                                <img src="https://raw.githubusercontent.com/zeno78/honestmd/main/logo.png" 
+                                     alt="HonestMD Logo" 
+                                     className="logo-image" 
+                                     onError={(e) => {e.target.style.display='none'}} />
+                                <div className="logo-text">
+                                    <h1>HonestMD</h1>
+                                    <p className="tagline">Healthcare Professional Reviews by Healthcare Professionals</p>
+                                </div>
                             </div>
                             <div className="verified-badge">
                                 <div className="verified-icon">✓</div>
