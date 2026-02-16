@@ -813,12 +813,18 @@
             const [searchName, setSearchName] = useState('');
             const [searchLocation, setSearchLocation] = useState('');
             const [searchSpecialty, setSearchSpecialty] = useState('');
+            const [searchZip, setSearchZip] = useState('');
+            const [searchRadius, setSearchRadius] = useState('25');
             const [provider, setProvider] = useState(null);
             const [searchResults, setSearchResults] = useState([]);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState('');
             const [reviews, setReviews] = useState([]);
             const [showReviewForm, setShowReviewForm] = useState(false);
+            const [zipCityState, setZipCityState] = useState('');
+            
+            // Zip code coordinate cache to avoid redundant API calls
+            const zipCache = React.useRef({});
             
             // Review form state
             const [rating, setRating] = useState(0);
@@ -829,9 +835,80 @@
             const [successMessage, setSuccessMessage] = useState('');
             const [showAnonymityWarning, setShowAnonymityWarning] = useState(false);
 
+            // Haversine formula - calculate distance in miles between two lat/lng points
+            const haversineDistance = (lat1, lon1, lat2, lon2) => {
+                const R = 3959; // Earth radius in miles
+                const dLat = (lat2 - lat1) * Math.PI / 180;
+                const dLon = (lon2 - lon1) * Math.PI / 180;
+                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
+            };
+
+            // Look up zip code coordinates via zippopotam.us (free, no key, CORS-enabled)
+            const lookupZip = async (zip) => {
+                if (zipCache.current[zip]) return zipCache.current[zip];
+                try {
+                    const resp = await fetch(`https://api.zippopotam.us/us/${zip}`);
+                    if (!resp.ok) return null;
+                    const data = await resp.json();
+                    const place = data.places[0];
+                    const result = {
+                        lat: parseFloat(place.latitude),
+                        lng: parseFloat(place.longitude),
+                        city: place['place name'],
+                        state: place['state abbreviation']
+                    };
+                    zipCache.current[zip] = result;
+                    return result;
+                } catch (e) {
+                    return null;
+                }
+            };
+
+            // Auto-fill city/state when zip code is entered
+            useEffect(() => {
+                if (searchZip.length === 5) {
+                    lookupZip(searchZip).then(result => {
+                        if (result) {
+                            setZipCityState(`${result.city}, ${result.state}`);
+                        } else {
+                            setZipCityState('');
+                        }
+                    });
+                } else {
+                    setZipCityState('');
+                }
+            }, [searchZip]);
+
+            // Robust NPI API fetch with multiple CORS proxy fallbacks
+            const fetchNpiApi = async (apiUrl) => {
+                // Try direct first (works locally and sometimes on custom domains)
+                const strategies = [
+                    () => fetch(apiUrl),
+                    () => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`),
+                    () => fetch(`https://corsproxy.io/?${encodeURIComponent(apiUrl)}`),
+                    () => fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(apiUrl)}`)
+                ];
+
+                for (const strategy of strategies) {
+                    try {
+                        const response = await strategy();
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data && data.result_count !== undefined) return data;
+                        }
+                    } catch (e) {
+                        continue;
+                    }
+                }
+                throw new Error('All API connection methods failed');
+            };
+
             // Helper function to normalize strings for better matching
-            const normalizeString = (str) => {
-                if (!str) return '';
+            const normalizeString = (str) => {                if (!str) return '';
                 return str
                     .toLowerCase()
                     .trim()
@@ -843,14 +920,20 @@
                 // Validate input
                 const hasNameOrLocation = searchName.trim() || searchLocation.trim();
                 const hasNPI = npiNumber && npiNumber.length === 10;
+                const hasZip = searchZip && searchZip.length === 5;
 
-                if (!hasNameOrLocation && !hasNPI) {
-                    setError('Please enter a provider name, location, or NPI number');
+                if (!hasNameOrLocation && !hasNPI && !hasZip) {
+                    setError('Please enter a provider name, location, zip code, or NPI number');
                     return;
                 }
 
                 if (npiNumber && npiNumber.length > 0 && npiNumber.length !== 10) {
                     setError('NPI number must be exactly 10 digits');
+                    return;
+                }
+
+                if (searchZip && searchZip.length > 0 && searchZip.length !== 5) {
+                    setError('Zip code must be exactly 5 digits');
                     return;
                 }
 
@@ -875,17 +958,7 @@
 
                     try {
                         const apiUrl = `https://npiregistry.cms.hhs.gov/api/?version=2.1&number=${npiNumber}`;
-                        let response;
-                        
-                        try {
-                            response = await fetch(apiUrl);
-                        } catch (corsError) {
-                            response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`);
-                        }
-
-                        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                        
-                        const data = await response.json();
+                        const data = await fetchNpiApi(apiUrl);
 
                         if (data.result_count === 0) {
                             setError('No provider found with this NPI number');
@@ -902,13 +975,106 @@
                         return;
                     } catch (err) {
                         console.error('NPI API Error:', err);
-                        setError('API connection failed. Try using name/location search instead.');
+                        setError('API connection failed. Please try again or use name/location search.');
                         setLoading(false);
                         return;
                     }
                 }
 
-                // Name/Location search
+                // ZIP CODE + RADIUS SEARCH
+                if (hasZip) {
+                    try {
+                        // Step 1: Get coordinates & state for the search zip
+                        const zipInfo = await lookupZip(searchZip);
+                        if (!zipInfo) {
+                            setError('Could not find that zip code. Please check and try again.');
+                            setLoading(false);
+                            return;
+                        }
+
+                        // Step 2: Search NPI by state (+ name/specialty if provided)
+                        const params = new URLSearchParams({
+                            version: '2.1',
+                            limit: '200',
+                            state: zipInfo.state
+                        });
+
+                        if (searchName.trim()) {
+                            const nameParts = searchName.trim().split(' ');
+                            if (nameParts.length === 1) {
+                                params.append('last_name', nameParts[0]);
+                            } else {
+                                params.append('first_name', nameParts[0]);
+                                params.append('last_name', nameParts.slice(1).join(' '));
+                            }
+                        }
+
+                        if (searchSpecialty.trim()) {
+                            params.append('taxonomy_description', searchSpecialty);
+                        }
+
+                        const apiUrl = `https://npiregistry.cms.hhs.gov/api/?${params.toString()}`;
+                        const data = await fetchNpiApi(apiUrl);
+
+                        if (!data || data.result_count === 0) {
+                            setError(`No providers found in ${zipInfo.state} matching your search criteria.`);
+                            setLoading(false);
+                            return;
+                        }
+
+                        // Step 3: Format results and calculate distances
+                        const radiusMiles = searchRadius === 'statewide' ? Infinity : parseInt(searchRadius);
+                        let formattedResults = data.results.map(formatProviderData);
+
+                        // Look up coordinates for each result's zip code and calculate distance
+                        const resultsWithDistance = await Promise.all(
+                            formattedResults.map(async (result) => {
+                                const resultZip = result.zip ? result.zip.substring(0, 5) : null;
+                                if (resultZip) {
+                                    const resultZipInfo = await lookupZip(resultZip);
+                                    if (resultZipInfo) {
+                                        const dist = haversineDistance(
+                                            zipInfo.lat, zipInfo.lng,
+                                            resultZipInfo.lat, resultZipInfo.lng
+                                        );
+                                        return { ...result, distance: Math.round(dist * 10) / 10 };
+                                    }
+                                }
+                                // If we can't determine distance, include but mark unknown
+                                return { ...result, distance: searchRadius === 'statewide' ? 0 : null };
+                            })
+                        );
+
+                        // Step 4: Filter by radius and sort by distance
+                        let filtered = resultsWithDistance.filter(r => {
+                            if (searchRadius === 'statewide') return true;
+                            if (r.distance === null) return false;
+                            return r.distance <= radiusMiles;
+                        });
+
+                        filtered.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+
+                        if (filtered.length === 0) {
+                            setError(`No providers found within ${radiusMiles} miles of ${searchZip} (${zipInfo.city}, ${zipInfo.state}). Try expanding your search radius.`);
+                        } else {
+                            setSearchResults(filtered);
+                            if (radiusMiles !== Infinity) {
+                                setSuccessMessage(`Found ${filtered.length} provider${filtered.length !== 1 ? 's' : ''} within ${radiusMiles} miles of ${zipInfo.city}, ${zipInfo.state}`);
+                                setTimeout(() => setSuccessMessage(''), 8000);
+                            }
+                        }
+                        setLoading(false);
+                        return;
+
+                    } catch (err) {
+                        console.error('Zip Search Error:', err);
+                        setError('Search failed. Please try again or use a different search method.');
+                        setLoading(false);
+                        return;
+                    }
+                }
+
+                // STANDARD Name/Location search (no zip)
                 try {
                     const params = new URLSearchParams({
                         version: '2.1',
@@ -926,7 +1092,6 @@
                     }
 
                     if (searchLocation.trim()) {
-                        // Check if it's a state code (2 letters) or city
                         if (searchLocation.length === 2) {
                             params.append('state', searchLocation.toUpperCase());
                         } else {
@@ -939,23 +1104,10 @@
                     }
 
                     const apiUrl = `https://npiregistry.cms.hhs.gov/api/?${params.toString()}`;
-                    let response;
-
-                    try {
-                        // Use CORS proxy for reliable connection from honestmd.net
-                        const corsProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`;
-                        response = await fetch(corsProxyUrl);
-                    } catch (corsError) {
-                        // If proxy fails, try direct (will fail on honestmd.net but works locally)
-                        response = await fetch(apiUrl);
-                    }
-
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    
-                    const data = await response.json();
+                    const data = await fetchNpiApi(apiUrl);
 
                     if (data.result_count === 0) {
-                        setError('No providers found matching your search. Try different criteria or check demo data.');
+                        setError('No providers found matching your search. Try different criteria or use zip code search.');
                         setLoading(false);
                         return;
                     }
@@ -967,7 +1119,7 @@
                 } catch (err) {
                     console.error('Search API Error:', err);
                     
-                    // Fallback to demo data search with forgiving matching
+                    // Fallback to demo data
                     const demoResults = Object.values(DEMO_PROVIDERS).filter(p => {
                         const normalizedSearchName = normalizeString(searchName);
                         const normalizedProviderName = normalizeString(p.name);
@@ -990,7 +1142,7 @@
 
                     if (demoResults.length > 0) {
                         setSearchResults(demoResults);
-                        setSuccessMessage('API unavailable - showing demo results. Try: Smith, Johnson, Chen');
+                        setSuccessMessage('API unavailable — showing demo results. Try: Smith, Johnson, Chen');
                         setTimeout(() => setSuccessMessage(''), 5000);
                     } else {
                         setError('API connection failed. Try demo searches: "Smith", "Johnson", or "Chen"');
@@ -1003,13 +1155,15 @@
                 const basic = providerData.basic;
                 const addresses = providerData.addresses;
                 const taxonomies = providerData.taxonomies;
+                const locationAddr = addresses.find(a => a.address_purpose === 'LOCATION') || addresses[0];
 
                 return {
                     npi: providerData.number,
                     name: `${basic.first_name} ${basic.last_name}${basic.credential ? ', ' + basic.credential : ''}`,
                     specialty: taxonomies[0]?.desc || 'General Practice',
-                    state: addresses.find(a => a.address_purpose === 'LOCATION')?.state || 'N/A',
-                    city: addresses.find(a => a.address_purpose === 'LOCATION')?.city || 'N/A'
+                    state: locationAddr?.state || 'N/A',
+                    city: locationAddr?.city || 'N/A',
+                    zip: locationAddr?.postal_code || null
                 };
             };
 
@@ -1055,11 +1209,10 @@
                     return;
                 }
 
-                // Check for potentially identifying info in review text
                 const identifyingPatterns = /\b(my name|I am|I'm the|only one|only \w+ who|my department|I work at|my hospital|my facility)\b/i;
                 if (identifyingPatterns.test(reviewText) && !showAnonymityWarning) {
                     setShowAnonymityWarning(true);
-                    setError('⚠️ Your review may contain identifying details. Please review the text and remove any information that could identify you, especially at smaller facilities. Click Submit again to confirm.');
+                    setError('⚠️ Your review may contain identifying details. Please review and remove any information that could identify you, especially at smaller facilities. Click Submit again to confirm.');
                     return;
                 }
 
@@ -1069,20 +1222,17 @@
                     text: reviewText,
                     categories: selectedCategories,
                     reviewerRole: displayRole,
-                    reviewerCredential: reviewerCredential, // stored privately, never displayed
+                    reviewerCredential: reviewerCredential,
                     date: new Date().toLocaleDateString(),
                     verified: true
                 };
 
-                // Store in mock database
                 if (!mockReviews[provider.npi]) {
                     mockReviews[provider.npi] = [];
                 }
                 mockReviews[provider.npi].unshift(newReview);
-                
                 setReviews([newReview, ...reviews]);
                 
-                // Reset form
                 setRating(0);
                 setReviewText('');
                 setSelectedCategories([]);
@@ -1091,9 +1241,7 @@
                 setShowReviewForm(false);
                 setShowAnonymityWarning(false);
                 setError('');
-                setSuccessMessage('Review submitted successfully! Your credential is stored privately — only your generic role category is displayed publicly.');
-
-                // Clear success message after 6 seconds
+                setSuccessMessage('Review submitted successfully! Your credential is stored privately — only your generic role category is displayed.');
                 setTimeout(() => setSuccessMessage(''), 6000);
             };
 
@@ -1148,7 +1296,52 @@
                             </div>
 
                             <div className="input-group">
-                                <label className="input-label">City or State</label>
+                                <label className="input-label">Zip Code</label>
+                                <div style={{display: 'flex', gap: '12px'}}>
+                                    <input
+                                        type="text"
+                                        className="input-field"
+                                        placeholder="5-digit zip"
+                                        value={searchZip}
+                                        onChange={(e) => setSearchZip(e.target.value.replace(/\D/g, '').slice(0, 5))}
+                                        onKeyPress={(e) => e.key === 'Enter' && searchProvider()}
+                                        style={{flex: '1'}}
+                                    />
+                                    <select
+                                        className="input-field"
+                                        value={searchRadius}
+                                        onChange={(e) => setSearchRadius(e.target.value)}
+                                        style={{flex: '1', cursor: 'pointer'}}
+                                    >
+                                        <option value="10">Within 10 miles</option>
+                                        <option value="25">Within 25 miles</option>
+                                        <option value="50">Within 50 miles</option>
+                                        <option value="100">Within 100 miles</option>
+                                        <option value="statewide">Statewide</option>
+                                    </select>
+                                </div>
+                                {zipCityState && (
+                                    <span className="input-hint" style={{color: 'var(--success-green)', fontStyle: 'normal', fontWeight: '500'}}>
+                                        📍 {zipCityState}
+                                    </span>
+                                )}
+                                {!zipCityState && (
+                                    <span className="input-hint">Enter zip code for radius-based search</span>
+                                )}
+                            </div>
+
+                            <div className="input-group">
+                                <label className="input-label">
+                                    City or State
+                                    <span style={{
+                                        fontSize: '0.8rem',
+                                        color: 'var(--text-secondary)',
+                                        fontWeight: 'normal',
+                                        marginLeft: '8px'
+                                    }}>
+                                        (alternative to zip code)
+                                    </span>
+                                </label>
                                 <input
                                     type="text"
                                     className="input-field"
@@ -1157,7 +1350,7 @@
                                     onChange={(e) => setSearchLocation(e.target.value)}
                                     onKeyPress={(e) => e.key === 'Enter' && searchProvider()}
                                 />
-                                <span className="input-hint">Try: "Orlando", "FL", "Tampa", "Miami"</span>
+                                <span className="input-hint">Use city name or 2-letter state code</span>
                             </div>
 
                             <div className="input-group">
@@ -1209,7 +1402,9 @@
                                         setSearchName('');
                                         setSearchLocation('');
                                         setSearchSpecialty('');
+                                        setSearchZip('');
                                         setNpiNumber('');
+                                        setZipCityState('');
                                     }}
                                 >
                                     Clear Results
@@ -1274,6 +1469,15 @@
                                                 <div className="result-details">
                                                     <span className="result-specialty">📋 {result.specialty}</span>
                                                     <span className="result-location">📍 {result.city}, {result.state}</span>
+                                                    {result.distance !== undefined && result.distance !== null && (
+                                                        <span style={{
+                                                            fontSize: '0.9rem',
+                                                            color: 'var(--secondary-teal)',
+                                                            fontWeight: '500'
+                                                        }}>
+                                                            🧭 {result.distance} mi
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {mockReviews[result.npi] && (
                                                     <div className="result-rating">
@@ -1326,7 +1530,6 @@
                                         <div className="review-section">
                                             <h3 className="section-header">Submit Your Review</h3>
                                             
-                                            {/* Anonymity Notice */}
                                             <div style={{
                                                 background: '#FEF3C7',
                                                 border: '2px solid #F59E0B',
@@ -1349,12 +1552,7 @@
                                                 <div className="input-group">
                                                     <label className="input-label">
                                                         Your Credential (Private) *
-                                                        <span style={{
-                                                            fontSize: '0.8rem',
-                                                            color: '#05A677',
-                                                            fontWeight: 'normal',
-                                                            marginLeft: '8px'
-                                                        }}>
+                                                        <span style={{fontSize: '0.8rem', color: '#05A677', fontWeight: 'normal', marginLeft: '8px'}}>
                                                             🔒 Never shown publicly
                                                         </span>
                                                     </label>
@@ -1365,18 +1563,13 @@
                                                         value={reviewerCredential}
                                                         onChange={(e) => setReviewerCredential(e.target.value)}
                                                     />
-                                                    <span className="input-hint">Used for verification only. This is encrypted and never displayed in your review.</span>
+                                                    <span className="input-hint">Used for verification only. Encrypted and never displayed in your review.</span>
                                                 </div>
 
                                                 <div className="input-group">
                                                     <label className="input-label">
                                                         Display As (Public) *
-                                                        <span style={{
-                                                            fontSize: '0.8rem',
-                                                            color: 'var(--text-secondary)',
-                                                            fontWeight: 'normal',
-                                                            marginLeft: '8px'
-                                                        }}>
+                                                        <span style={{fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 'normal', marginLeft: '8px'}}>
                                                             👁️ This is what others see
                                                         </span>
                                                     </label>
