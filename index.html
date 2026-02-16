@@ -624,6 +624,79 @@
                 opacity: .5;
             }
         }
+
+        /* Join Beta Button */
+        .join-beta-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--accent-coral);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(217, 79, 64, 0.3);
+            border: none;
+            cursor: pointer;
+        }
+
+        .join-beta-btn:hover {
+            background: #C23E30;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(217, 79, 64, 0.4);
+        }
+
+        /* Footer */
+        .footer {
+            background: var(--card-bg);
+            border-top: 2px solid var(--border-color);
+            padding: 40px 20px;
+            margin-top: 60px;
+        }
+
+        .footer-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 40px;
+        }
+
+        .footer-section h3 {
+            color: var(--primary-blue);
+            font-size: 1.1rem;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+
+        .footer-section p,
+        .footer-section a {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.8;
+            text-decoration: none;
+        }
+
+        .footer-section a:hover {
+            color: var(--primary-blue);
+        }
+
+        .footer-email {
+            color: var(--secondary-teal);
+            font-weight: 500;
+        }
+
+        .footer-bottom {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
     </style>
 </head>
 <body>
@@ -836,9 +909,12 @@
                     let response;
 
                     try {
-                        response = await fetch(apiUrl);
+                        // Use CORS proxy for reliable connection from honestmd.net
+                        const corsProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`;
+                        response = await fetch(corsProxyUrl);
                     } catch (corsError) {
-                        response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`);
+                        // If proxy fails, try direct (will fail on honestmd.net but works locally)
+                        response = await fetch(apiUrl);
                     }
 
                     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -985,9 +1061,15 @@
                                     <p className="tagline">Physician Reviews by Healthcare Professionals</p>
                                 </div>
                             </div>
-                            <div className="verified-badge">
-                                <div className="verified-icon">✓</div>
-                                <span>Verified Reviews Only</span>
+                            <div style={{display: 'flex', alignItems: 'center', gap: '16px'}}>
+                                <a href="mailto:honestmd.net@gmail.com?subject=Join%20HonestMD%20Beta" 
+                                   className="join-beta-btn">
+                                    Join Beta
+                                </a>
+                                <div className="verified-badge">
+                                    <div className="verified-icon">✓</div>
+                                    <span>Verified Reviews Only</span>
+                                </div>
                             </div>
                         </div>
                     </header>
@@ -1034,7 +1116,17 @@
 
                             <div style={{borderTop: '1px solid var(--border-color)', paddingTop: '16px', marginTop: '16px'}}>
                                 <div className="input-group">
-                                    <label className="input-label">Or Search by NPI Number</label>
+                                    <label className="input-label">
+                                        Or Search by NPI Number
+                                        <span style={{
+                                            fontSize: '0.8rem',
+                                            color: 'var(--text-secondary)',
+                                            fontWeight: 'normal',
+                                            marginLeft: '8px'
+                                        }}>
+                                            (10-digit National Provider ID)
+                                        </span>
+                                    </label>
                                     <input
                                         type="text"
                                         className="input-field"
@@ -1274,6 +1366,67 @@
                             )}
                         </div>
                     </div>
+
+                    <footer className="footer">
+                        <div className="footer-content">
+                            <div className="footer-section">
+                                <h3>How It Works</h3>
+                                <p style={{marginBottom: '12px'}}>
+                                    <strong>For Patients:</strong><br />
+                                    Search physicians by name, location, or NPI number. 
+                                    Read verified reviews from healthcare professionals who've worked alongside them.
+                                </p>
+                                <p>
+                                    <strong>For Healthcare Professionals:</strong><br />
+                                    Apply with credentials → Get verified → Review anonymously. 
+                                    We protect your identity while ensuring authentic reviews.
+                                </p>
+                            </div>
+                            <div className="footer-section">
+                                <h3>For Reviewers</h3>
+                                <p>
+                                    Join our verified reviewer community. We verify credentials 
+                                    (medical license or hospital badge) while protecting your anonymity through encryption.
+                                </p>
+                                <p style={{marginTop: '12px'}}>
+                                    <a href="mailto:honestmd.net@gmail.com?subject=Become%20a%20Verified%20Reviewer">
+                                        Apply to Review →
+                                    </a>
+                                </p>
+                            </div>
+                            <div className="footer-section">
+                                <h3>For Physicians</h3>
+                                <p style={{marginBottom: '12px'}}>
+                                    Questions about a review? We take accuracy seriously. 
+                                    All reviews are verified and moderated.
+                                </p>
+                                <p>
+                                    Physicians can request review of potentially inaccurate information.
+                                </p>
+                                <p style={{marginTop: '12px'}}>
+                                    <a href="mailto:honestmd.net@gmail.com?subject=Physician%20Review%20Question" className="footer-email">
+                                        Contact Us
+                                    </a>
+                                </p>
+                            </div>
+                            <div className="footer-section">
+                                <h3>Contact</h3>
+                                <p>Questions or feedback?</p>
+                                <p style={{marginTop: '8px'}}>
+                                    <a href="mailto:honestmd.net@gmail.com" className="footer-email">
+                                        honestmd.net@gmail.com
+                                    </a>
+                                </p>
+                                <p style={{marginTop: '16px', fontSize: '0.85rem'}}>
+                                    Currently in beta. More features coming soon including advanced search, 
+                                    filters, and physician response capability.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="footer-bottom">
+                            © 2026 HonestMD. Physician peer review platform. Reviews by verified healthcare professionals.
+                        </div>
+                    </footer>
                 </div>
             );
         }
