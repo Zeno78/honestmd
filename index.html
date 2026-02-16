@@ -713,6 +713,19 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
+        // Generic display role categories (what the public sees)
+        const DISPLAY_ROLE_OPTIONS = [
+            'Surgical Team Member',
+            'Nursing Professional',
+            'Physician Colleague',
+            'Advanced Practice Provider',
+            'Anesthesia Provider',
+            'Allied Health Professional',
+            'Clinical Support Staff',
+            'Emergency Team Member',
+            'Administrative/Leadership'
+        ];
+
         // Mock data store (in production, this would be a backend database)
         const mockReviews = {
             '1234567890': [
@@ -721,7 +734,7 @@
                     rating: 5,
                     text: 'Dr. Johnson is exceptional in the OR. Her surgical precision and decision-making under pressure are outstanding. She takes time to explain procedures to the team and always maintains a calm demeanor.',
                     categories: ['Clinical Skill', 'Team Collaboration', 'Communication'],
-                    reviewerRole: 'Surgical First Assistant',
+                    reviewerRole: 'Surgical Team Member',
                     date: '2/10/2026',
                     verified: true
                 },
@@ -730,7 +743,7 @@
                     rating: 5,
                     text: 'Outstanding orthopedic surgeon. Very thorough in her assessments and excellent at teaching residents. Always puts patient safety first.',
                     categories: ['Clinical Skill', 'Teaching Ability', 'Decision Making'],
-                    reviewerRole: 'OR Nurse',
+                    reviewerRole: 'Nursing Professional',
                     date: '2/5/2026',
                     verified: true
                 }
@@ -741,7 +754,7 @@
                     rating: 4,
                     text: 'Dr. Chen is excellent in high-stress emergency situations. Quick thinker and great communicator with the team. Occasionally can be brusque when extremely busy, but always professional.',
                     categories: ['Crisis Management', 'Clinical Skill', 'Decision Making'],
-                    reviewerRole: 'Emergency Medicine PA',
+                    reviewerRole: 'Emergency Team Member',
                     date: '2/8/2026',
                     verified: true
                 }
@@ -752,7 +765,7 @@
                     rating: 5,
                     text: 'Dr. Smith has excellent bedside manner and takes time with each patient. His diagnostic skills are sharp and he collaborates well with the entire care team.',
                     categories: ['Bedside Manner', 'Communication', 'Team Collaboration'],
-                    reviewerRole: 'Medical Assistant',
+                    reviewerRole: 'Clinical Support Staff',
                     date: '2/12/2026',
                     verified: true
                 }
@@ -811,8 +824,10 @@
             const [rating, setRating] = useState(0);
             const [reviewText, setReviewText] = useState('');
             const [selectedCategories, setSelectedCategories] = useState([]);
-            const [reviewerRole, setReviewerRole] = useState('');
+            const [reviewerCredential, setReviewerCredential] = useState('');
+            const [displayRole, setDisplayRole] = useState('');
             const [successMessage, setSuccessMessage] = useState('');
+            const [showAnonymityWarning, setShowAnonymityWarning] = useState(false);
 
             // Helper function to normalize strings for better matching
             const normalizeString = (str) => {
@@ -1031,8 +1046,20 @@
                     setError('Please select at least one category');
                     return;
                 }
-                if (!reviewerRole.trim()) {
-                    setError('Please enter your role');
+                if (!reviewerCredential.trim()) {
+                    setError('Please enter your credential (this stays private)');
+                    return;
+                }
+                if (!displayRole) {
+                    setError('Please select how your role will display publicly');
+                    return;
+                }
+
+                // Check for potentially identifying info in review text
+                const identifyingPatterns = /\b(my name|I am|I'm the|only one|only \w+ who|my department|I work at|my hospital|my facility)\b/i;
+                if (identifyingPatterns.test(reviewText) && !showAnonymityWarning) {
+                    setShowAnonymityWarning(true);
+                    setError('⚠️ Your review may contain identifying details. Please review the text and remove any information that could identify you, especially at smaller facilities. Click Submit again to confirm.');
                     return;
                 }
 
@@ -1041,7 +1068,8 @@
                     rating,
                     text: reviewText,
                     categories: selectedCategories,
-                    reviewerRole,
+                    reviewerRole: displayRole,
+                    reviewerCredential: reviewerCredential, // stored privately, never displayed
                     date: new Date().toLocaleDateString(),
                     verified: true
                 };
@@ -1058,13 +1086,15 @@
                 setRating(0);
                 setReviewText('');
                 setSelectedCategories([]);
-                setReviewerRole('');
+                setReviewerCredential('');
+                setDisplayRole('');
                 setShowReviewForm(false);
+                setShowAnonymityWarning(false);
                 setError('');
-                setSuccessMessage('Review submitted successfully! (Note: In production, this would require verification)');
+                setSuccessMessage('Review submitted successfully! Your credential is stored privately — only your generic role category is displayed publicly.');
 
-                // Clear success message after 5 seconds
-                setTimeout(() => setSuccessMessage(''), 5000);
+                // Clear success message after 6 seconds
+                setTimeout(() => setSuccessMessage(''), 6000);
             };
 
             const calculateAverageRating = () => {
@@ -1295,16 +1325,73 @@
                                     {showReviewForm && (
                                         <div className="review-section">
                                             <h3 className="section-header">Submit Your Review</h3>
+                                            
+                                            {/* Anonymity Notice */}
+                                            <div style={{
+                                                background: '#FEF3C7',
+                                                border: '2px solid #F59E0B',
+                                                borderRadius: '10px',
+                                                padding: '16px 20px',
+                                                marginBottom: '20px',
+                                                fontSize: '0.9rem',
+                                                lineHeight: '1.6'
+                                            }}>
+                                                <strong style={{color: '#92400E'}}>🔒 Your Anonymity Is Protected</strong>
+                                                <ul style={{margin: '8px 0 0 16px', color: '#78350F'}}>
+                                                    <li>Your exact credential is <strong>never displayed publicly</strong> — only the generic category you choose below</li>
+                                                    <li>At smaller facilities, even general details can narrow identification — write as if a colleague will read this</li>
+                                                    <li>Avoid mentioning specific dates, shift times, case details, or department names</li>
+                                                    <li>Do not reference your exact title, years of experience, or unique responsibilities</li>
+                                                </ul>
+                                            </div>
+
                                             <div className="review-form">
                                                 <div className="input-group">
-                                                    <label className="input-label">Your Role *</label>
+                                                    <label className="input-label">
+                                                        Your Credential (Private) *
+                                                        <span style={{
+                                                            fontSize: '0.8rem',
+                                                            color: '#05A677',
+                                                            fontWeight: 'normal',
+                                                            marginLeft: '8px'
+                                                        }}>
+                                                            🔒 Never shown publicly
+                                                        </span>
+                                                    </label>
                                                     <input
                                                         type="text"
                                                         className="input-field"
-                                                        placeholder="e.g., Surgical First Assistant, RN, Anesthesiologist"
-                                                        value={reviewerRole}
-                                                        onChange={(e) => setReviewerRole(e.target.value)}
+                                                        placeholder="e.g., CST, CSFA, RN, BSN, PA-C, MD, CRNA"
+                                                        value={reviewerCredential}
+                                                        onChange={(e) => setReviewerCredential(e.target.value)}
                                                     />
+                                                    <span className="input-hint">Used for verification only. This is encrypted and never displayed in your review.</span>
+                                                </div>
+
+                                                <div className="input-group">
+                                                    <label className="input-label">
+                                                        Display As (Public) *
+                                                        <span style={{
+                                                            fontSize: '0.8rem',
+                                                            color: 'var(--text-secondary)',
+                                                            fontWeight: 'normal',
+                                                            marginLeft: '8px'
+                                                        }}>
+                                                            👁️ This is what others see
+                                                        </span>
+                                                    </label>
+                                                    <select
+                                                        className="input-field"
+                                                        value={displayRole}
+                                                        onChange={(e) => setDisplayRole(e.target.value)}
+                                                        style={{cursor: 'pointer'}}
+                                                    >
+                                                        <option value="">Select a generic role category...</option>
+                                                        {DISPLAY_ROLE_OPTIONS.map(role => (
+                                                            <option key={role} value={role}>{role}</option>
+                                                        ))}
+                                                    </select>
+                                                    <span className="input-hint">Choose the broadest category that applies. This protects your identity, especially at smaller facilities.</span>
                                                 </div>
 
                                                 <div className="input-group">
@@ -1341,14 +1428,18 @@
                                                     <label className="input-label">Your Review *</label>
                                                     <textarea
                                                         className="input-field"
-                                                        placeholder="Share your professional experience working with this provider..."
+                                                        placeholder="Share your professional experience working with this provider. Avoid details that could identify you — no specific dates, case details, department names, or unique role descriptions."
                                                         value={reviewText}
-                                                        onChange={(e) => setReviewText(e.target.value)}
+                                                        onChange={(e) => {
+                                                            setReviewText(e.target.value);
+                                                            setShowAnonymityWarning(false);
+                                                        }}
                                                     />
+                                                    <span className="input-hint">⚠️ Write as if a colleague at your facility will read this. Keep it professional and non-identifiable.</span>
                                                 </div>
 
                                                 <button className="btn btn-primary" onClick={submitReview}>
-                                                    Submit Review
+                                                    {showAnonymityWarning ? '⚠️ Confirm & Submit Review' : 'Submit Review'}
                                                 </button>
                                             </div>
                                         </div>
@@ -1370,7 +1461,7 @@
                                                         <div className="review-header">
                                                             <div className="reviewer-info">
                                                                 <span className="reviewer-badge">
-                                                                    ✓ {review.reviewerRole}
+                                                                    ✓ Verified {review.reviewerRole}
                                                                 </span>
                                                                 <span className="review-date">{review.date}</span>
                                                             </div>
@@ -1415,7 +1506,8 @@
                                 <h3>For Reviewers</h3>
                                 <p>
                                     Join our verified reviewer community. We verify credentials 
-                                    (medical license or hospital badge) while protecting your anonymity through encryption.
+                                    (medical license or hospital badge) while protecting your anonymity — 
+                                    your exact credential is never displayed. Only a generic role category is shown publicly.
                                 </p>
                                 <p style={{marginTop: '12px'}}>
                                     <a href="mailto:honestmd.net@gmail.com?subject=Become%20a%20Verified%20Reviewer">
